@@ -1,0 +1,25 @@
+# Dependencies and builds
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# Local data and logs
+*.log
+*.dump
+*.sql.gz
+.DS_Store
+.vercel/
+
+# Test artifacts
+playwright-report/
+test-results/

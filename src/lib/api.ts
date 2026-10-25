@@ -1,0 +1,1 @@
+export function jsonError(error: unknown, fallback = "Request failed") { const message = error instanceof Error ? error.message : fallback; const status = /Authentication/.test(message) ? 401 : /Permission|Origin|CSRF/.test(message) ? 403 : /Too many/.test(message) ? 429 : 400; return Response.json({ ok: false, error: message }, { status }); }

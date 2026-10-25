@@ -1,0 +1,9 @@
+import { z } from "zod";
+import { db } from "@/db";
+import { auditEvents, interactions, prospects, suppressions } from "@/db/schema";
+import { assertCsrf, requireAny } from "@/lib/auth";
+import { jsonError } from "@/lib/api";
+import { assertOrigin } from "@/lib/security";
+import { eq } from "drizzle-orm";
+const input = z.object({ prospectId: z.string().uuid(), type: z.enum(["inbound", "outbound", "reply", "note", "bounce", "complaint", "opt_out"]), channel: z.enum(["email", "phone", "whatsapp", "web_form"]).optional(), classification: z.enum(["interested", "not_now", "not_interested", "opt_out", "referral", "bounce", "unknown"]).optional(), subject: z.string().max(200).optional(), body: z.string().trim().min(1).max(10_000), occurredAt: z.coerce.date() });
+export async function POST(request: Request) { try { assertOrigin(request); const user = await requireAny(["owner", "admin", "operator", "reviewer"]); assertCsrf(request, user); const data = input.parse(await request.json()); const [row] = await db.insert(interactions).values({ ...data, recordedBy: user.id }).returning(); if (data.type === "opt_out" || data.classification === "opt_out") { await db.insert(suppressions).values({ prospectId: data.prospectId, channel: data.channel, reason: "Recipient opted out", source: "interaction", createdBy: user.id }); await db.update(prospects).set({ stage: "suppressed", updatedAt: new Date() }).where(eq(prospects.id, data.prospectId)); } else if (data.type === "reply") await db.update(prospects).set({ stage: "responded", updatedAt: new Date() }).where(eq(prospects.id, data.prospectId)); await db.insert(auditEvents).values({ actorId: user.id, action: `interaction.${data.type}`, entityType: "prospect", entityId: data.prospectId, summary: data.subject || data.type }); return Response.json({ ok: true, id: row.id }, { status: 201 }); } catch (error) { return jsonError(error, "Interaction failed"); } }

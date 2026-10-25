@@ -1,0 +1,13 @@
+import "dotenv/config";
+import { eq } from "drizzle-orm";
+import { db, pool } from "../src/db";
+import { sources } from "../src/db/schema";
+import { createProspect } from "../src/lib/prospect-service";
+const records=[
+ {displayName:"Panigrahana Weddings",organisation:"Wedvitez Planners Private Limited",role:"Wedding planning, design and decor studio",url:"https://panigrahana.com/",excerpt:"Panigrahana provides full-service wedding planning, vendor sourcing and management, and operates from Bangalore.",summary:"First-party site supports Bengaluru wedding-planning and vendor-management partnership relevance."},
+ {displayName:"Dreamstrokes",organisation:"Dreamstrokes",role:"Luxury wedding planning and decor business",url:"https://www.dreamstrokes.in/services",excerpt:"Dreamstrokes describes wedding planning in Bangalore and coordination across venues, photography, guest logistics and other vendors.",summary:"First-party services page supports Bengaluru wedding and vendor-coordination relevance."},
+ {displayName:"The Tales of Tradition",organisation:"Machani Hospitalities LLP",role:"Wedding planning and consultancy",url:"https://thetalesoftradition.com/",excerpt:"The business describes full-service wedding planning, consultancy and vendor collaboration from Bangalore.",summary:"First-party site supports premium wedding-planning and partnership relevance."},
+ {displayName:"The Tamarind Tree",organisation:"Machani Hospitalities LLP",role:"Premium wedding venue and planning business",url:"https://www.thetamarindtree.in/wedding-planning/",excerpt:"The venue hosts weddings and presents a full-service wedding planning and consultancy team in Bangalore.",summary:"First-party site supports Bengaluru venue and wedding-planning partnership relevance."},
+];
+async function main(){const[source]=await db.select().from(sources).where(eq(sources.name,"First-party referral research")).limit(1);if(!source)throw new Error("Referral source missing");for(const r of records){try{const result=await createProspect({sourceId:source.id,displayName:r.displayName,organisation:r.organisation,role:r.role,city:"Bengaluru",category:"referral_partner",sourceUrl:r.url,evidenceType:"commercial_relevance",excerpt:r.excerpt,summary:r.summary,evidenceConfidence:80,inbound:false,isTest:false},null);console.log(JSON.stringify({name:r.displayName,status:"retained",id:result.prospectId,fit:result.scores.commercialFit,confidence:result.scores.identityConfidence}))}catch(e){console.log(JSON.stringify({name:r.displayName,status:"not_retained",reason:e instanceof Error?e.message:String(e)}))}}}
+main().then(()=>pool.end()).catch(async e=>{console.error(e);await pool.end();process.exit(1)});
