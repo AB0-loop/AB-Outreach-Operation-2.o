@@ -11,5 +11,5 @@
 - Added manual response, consultation, order, revenue and cost tracking.
 - Added persistent jobs, safe source checks, retries and dead-letter visibility.
 - Added Cloud Run packaging, backup/restore scripts and operating documentation.
-- Executed source healthcheck, four-record referral sample, 17 automated tests, 13-check E2E and isolated restore test.
+- Executed source healthcheck, four-record referral sample, 17 automated tests, 14-check E2E and isolated restore test.
 - No DNS changed, service purchased or real outreach sent.

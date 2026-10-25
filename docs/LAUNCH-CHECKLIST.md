@@ -5,7 +5,7 @@
 - [x] Isolated schema and independent migration journal.
 - [x] Migration applied without modifying preserved public tables.
 - [x] 17 unit/database tests pass.
-- [x] 13-check HTTP E2E passes with zero provider sends.
+- [x] 14-check HTTP E2E passes with zero provider sends.
 - [x] Real source health job completed.
 - [x] Four real first-party partner records retain evidence.
 - [x] Backup restored into isolated database successfully.
