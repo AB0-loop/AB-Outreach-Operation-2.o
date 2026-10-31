@@ -59,3 +59,7 @@ The script validates checksum, creates an isolated temporary database, restores,
 4. Process any opt-out/complaint.
 
 Restart only after database, backup, mailbox, DNS, suppression and dry-run checks pass.
+
+## Autonomous schedule
+
+Create a Cloud Scheduler job that runs the worker Cloud Run Job **hourly** (for example `0 * * * *`, time zone Asia/Kolkata). One trigger runs everything: the worker schedules the day's discovery and the 20:00 IST report itself. Set `GOOGLE_PLACES_API_KEY` in Secret Manager. Restrict the key to the Places API, and to the worker's egress where possible. Monitor `dead_letter` jobs and the "Recent discovery runs" panel. See `docs/DISCOVERY.md`.

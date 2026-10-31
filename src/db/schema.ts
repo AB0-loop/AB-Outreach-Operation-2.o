@@ -125,9 +125,11 @@ export const prospects = acquisition.table("prospects", {
   assignedTo: uuid("assigned_to").references(() => users.id, { onDelete: "set null" }),
   lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
   isTest: boolean("is_test").notNull().default(false),
+  externalKey: text("external_key"),
+  website: text("website"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, t => [index("prospects_stage_idx").on(t.stage), index("prospects_org_idx").on(t.organisation), check("prospects_identity_score_ck", sql`${t.identityConfidence} between 0 and 100`), check("prospects_fit_score_ck", sql`${t.commercialFit} between 0 and 100`)]);
+}, t => [uniqueIndex("prospects_external_key_uq").on(t.externalKey), index("prospects_stage_idx").on(t.stage), index("prospects_org_idx").on(t.organisation), check("prospects_identity_score_ck", sql`${t.identityConfidence} between 0 and 100`), check("prospects_fit_score_ck", sql`${t.commercialFit} between 0 and 100`)]);
 
 export const evidence = acquisition.table("evidence", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -158,6 +160,8 @@ export const contacts = acquisition.table("contacts", {
   verificationMethod: text("verification_method"),
   verifiedAt: timestamp("verified_at", { withTimezone: true }),
   staleAfter: timestamp("stale_after", { withTimezone: true }),
+  kind: text("kind").notNull().default("unknown"),
+  corroborated: boolean("corroborated").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, t => [uniqueIndex("contacts_prospect_fingerprint_uq").on(t.prospectId, t.fingerprint), index("contacts_fingerprint_idx").on(t.fingerprint)]);
 
@@ -340,3 +344,44 @@ export const auditEvents = acquisition.table("audit_events", {
   requestId: text("request_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, t => [index("audit_entity_idx").on(t.entityType, t.entityId, t.createdAt), index("audit_actor_idx").on(t.actorId, t.createdAt)]);
+
+export const discoveryQueries = acquisition.table("discovery_queries", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  query: text("query").notNull(),
+  category: category("category").notNull(),
+  active: boolean("active").notNull().default(true),
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, t => [uniqueIndex("discovery_query_uq").on(t.query)]);
+
+export const providerUsage = acquisition.table("provider_usage", {
+  provider: text("provider").notNull(),
+  day: text("day").notNull(),
+  calls: integer("calls").notNull().default(0),
+}, t => [uniqueIndex("provider_usage_day_uq").on(t.provider, t.day), check("provider_usage_calls_ck", sql`${t.calls} >= 0`)]);
+
+export const contactVerifications = acquisition.table("contact_verifications", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  contactId: uuid("contact_id").notNull().references(() => contacts.id, { onDelete: "cascade" }),
+  method: text("method").notNull(),
+  result: text("result").notNull(),
+  detail: jsonb("detail").$type<Record<string, unknown>>(),
+  checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+}, t => [index("contact_verifications_contact_idx").on(t.contactId, t.checkedAt)]);
+
+export const dailyReports = acquisition.table("daily_reports", {
+  day: text("day").primaryKey(),
+  summary: jsonb("summary").$type<Record<string, unknown>>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const callLogs = acquisition.table("call_logs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  prospectId: uuid("prospect_id").notNull().references(() => prospects.id, { onDelete: "cascade" }),
+  contactId: uuid("contact_id").notNull().references(() => contacts.id, { onDelete: "cascade" }),
+  outcome: text("outcome").notNull(),
+  dndChecked: boolean("dnd_checked").notNull(),
+  notes: text("notes"),
+  calledBy: uuid("called_by").notNull().references(() => users.id, { onDelete: "restrict" }),
+  calledAt: timestamp("called_at", { withTimezone: true }).notNull().defaultNow(),
+}, t => [index("call_logs_contact_idx").on(t.contactId, t.calledAt), check("call_logs_dnd_ck", sql`${t.dndChecked} = true`)]);
