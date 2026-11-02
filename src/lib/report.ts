@@ -13,6 +13,7 @@ export async function buildDailyReport(day: string) {
   const contactsByType = await q(sql`select channel, kind, verification, count(*)::int n from aurum_acquisition.contacts where created_at >= ${start} and created_at < ${end} group by 1,2,3 order by 4 desc`);
   const [qualified] = await q(sql`select count(*)::int n from aurum_acquisition.contacts c join aurum_acquisition.prospects p on p.id=c.prospect_id where c.created_at >= ${start} and c.created_at < ${end} and p.is_test=false and p.commercial_fit >= 65 and p.identity_confidence >= 60 and c.verification in ('verified','published_unverified','self_provided') and not exists (select 1 from aurum_acquisition.suppressions s where s.active and (s.prospect_id=p.id or s.contact_fingerprint=c.fingerprint))`);
   const [calls] = await q(sql`select count(*)::int calls, count(*) filter (where outcome='meeting_booked')::int meetings, count(*) filter (where outcome='connected_interested')::int interested from aurum_acquisition.call_logs where called_at >= ${start} and called_at < ${end}`);
+  const crossChecks = await q(sql`select result, count(*)::int n from aurum_acquisition.contact_verifications where method = 'google_places_crosscheck' and checked_at >= ${start} and checked_at < ${end} group by 1`);
   const usage = await q(sql`select provider, calls from aurum_acquisition.provider_usage where day = ${day}`);
   const queue = await getCallQueue(10);
   const summary = {
@@ -20,7 +21,7 @@ export async function buildDailyReport(day: string) {
     sourceRuns: runs, prospects: prospectsRow, contactsCreated: contactsByType,
     autoQualifiedContacts: { count: qualified.n, definition: "contact created today on a prospect with commercial fit ≥65 and identity confidence ≥60, contact not invalid, no active suppression; awaiting human review" },
     callQueue: { ready: (await getCallQueue(500)).length, top: queue.map(r => ({ name: r.displayName, phone: r.value, priority: r.priority, reasons: r.reasons })) },
-    callsToday: calls, providerUsage: usage,
+    phoneCrossChecks: crossChecks, callsToday: calls, providerUsage: usage,
   };
   await db.insert(dailyReports).values({ day, summary }).onConflictDoUpdate({ target: dailyReports.day, set: { summary, createdAt: new Date() } });
   return summary;

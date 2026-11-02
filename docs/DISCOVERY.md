@@ -39,3 +39,27 @@ Businesses already verified in the last 30 days are skipped. Deduplication uses 
 - Places Text Search with website and phone fields is billed at the Enterprise SKU: 1,000 free requests a month, then $35 per 1,000.
 - Defaults: 8 searches a day (about 240 a month, inside the free allowance) and a hard cap of 30 a day, enforced atomically in `provider_usage`.
 - Crawling, MX checks and scoring add no API cost.
+
+## Combined design (2 Nov 2026)
+
+- **Primary system (kept):** worker and job processing, first-party extraction, security, verification, reporting and the call queue, plus the tested security, deduplication, scoring and sales tracking.
+- **Google Places connector (`src/lib/discovery/places.ts`):**
+  - Text Search with optional pagination (`DISCOVERY_PAGES_PER_QUERY`, up to 3 pages).
+  - Place Details re-requested by stored place ID.
+  - Listing-to-website matching for seeded sites, accepted only when the listing's website domain matches the business's own domain.
+  - Every call is capped per day by an atomic counter.
+- **Independent business-phone cross-check (`src/lib/discovery/crosscheck.ts`):**
+  - Source 1 is the number published on the business's website, stored with its page and excerpt. Source 2 is the business's Google listing.
+  - A match makes the contact `verified` and `corroborated`. A previously corroborated number that stops matching is demoted.
+  - Runs daily (`verify.crosscheck_daily`) for up to `CROSSCHECK_PROSPECTS_PER_DAY` businesses not checked in 30 days, highest commercial fit first. Also available as "Cross-check now" on each prospect page.
+
+### Google terms boundary (enforced in code and tests)
+
+- Stored from Google: place IDs and the match outcome only (`match`, `no_match`, `no_listing_phone`, `no_listing`).
+- Never stored: Google's phone number, website, name or address. An integration test asserts that the listing's digits do not appear in any verification record.
+- Stored contacts always come from the business's own website.
+
+### Cost
+
+- Place Details with the phone field is Enterprise tier: 1,000 free requests a month, then about $20 per 1,000.
+- Defaults are 15 cross-checks a day with a hard cap of 25, so typical monthly use (about 450 discovery-time and refresh checks combined) stays within the free allowance.

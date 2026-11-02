@@ -22,3 +22,11 @@
 - Added LinkedIn/web research links and manual evidence entry (no automated LinkedIn access).
 - Live run on 4 first-party partner sites: 4/4 processed, 8 contacts (3 role emails, 5 phones), 5 call-ready; fixed a duplicate caused by an SEO page title.
 - Tests: 26 unit/integration, 17-check E2E.
+
+## 2026-11-02 — Combined connector and independent phone cross-check
+
+- Kept the primary worker, extraction, security, verification, reporting and call-queue design.
+- Added a dedicated Google Places connector: Text Search pagination, Place Details by stored ID, domain-matched listing lookup and per-endpoint daily caps.
+- Added an independent business-phone cross-check: daily refresh, manual trigger, demotion when a number stops matching, outcome-only storage, and cross-check figures in the daily report.
+- Hardened the job-claim test so it can't consume real queued work.
+- Tests: 33 unit/integration (three consecutive passing runs), 17-check E2E unchanged and passing.

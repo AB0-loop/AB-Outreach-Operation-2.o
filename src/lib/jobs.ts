@@ -7,6 +7,7 @@ import { log } from "@/lib/log";
 import { istDay, placesConfigured, placesTextSearch } from "@/lib/discovery/places";
 import { processWebsite, type WebsiteResult } from "@/lib/discovery/pipeline";
 import { buildDailyReport } from "@/lib/report";
+import { crossCheckProspect, logCrossCheckSkip, selectCrossCheckTargets } from "@/lib/discovery/crosscheck";
 
 export async function claimJob(workerId: string) { const result = await db.execute(sql`with candidate as (select id from aurum_acquisition.jobs where ((status in ('queued','retry_wait') and run_after <= now()) or (status='running' and locked_at < now() - interval '15 minutes')) order by run_after, created_at for update skip locked limit 1) update aurum_acquisition.jobs j set status='running', attempts=j.attempts+1, locked_at=now(), locked_by=${workerId}, updated_at=now() from candidate where j.id=candidate.id returning j.*`); const row = result.rows[0] as Record<string, unknown> | undefined; if (!row) return null; return { id: String(row.id), type: String(row.type), payload: row.payload as Record<string, unknown>, attempts: Number(row.attempts), maxAttempts: Number(row.max_attempts) }; }
 type ClaimedJob = NonNullable<Awaited<ReturnType<typeof claimJob>>>;
@@ -17,6 +18,7 @@ export async function enqueue(type: string, payload: Record<string, unknown>, id
 export async function ensureDailySchedule(now = new Date()) {
   const day = istDay(now);
   await enqueue("discovery.daily", { day }, `discovery.daily:${day}`, now);
+  await enqueue("verify.crosscheck_daily", { day }, `verify.crosscheck_daily:${day}`, new Date(now.getTime() + 60_000));
   const reportAt = new Date(`${day}T20:00:00+05:30`);
   await enqueue("report.daily", { day }, `report.daily:${day}`, reportAt > now ? reportAt : now);
 }
@@ -60,6 +62,8 @@ export async function processJob(job: ClaimedJob) {
     else if (job.type === "discovery.daily") await discoveryDaily(job.payload);
     else if (job.type === "discovery.query") await discoveryQuery(job.payload);
     else if (job.type === "discovery.website") await discoveryWebsite(job.payload);
+    else if (job.type === "verify.crosscheck_daily") await crossCheckDaily(job.payload);
+    else if (job.type === "verify.crosscheck") await crossCheckProspect(String(job.payload.prospectId));
     else if (job.type === "report.daily") await buildDailyReport(String(job.payload.day ?? istDay()));
     else if (job.type === "maintenance.expire_sessions") await db.execute(sql`delete from aurum_acquisition.sessions where expires_at < now()`);
     else throw new Error(`Unsupported job type ${job.type}`);
@@ -76,3 +80,8 @@ export async function processJob(job: ClaimedJob) {
   }
 }
 export async function runOnce(workerId: string) { const job = await claimJob(workerId); if (!job) return { status: "empty" as const }; return processJob(job); }
+async function crossCheckDaily(payload: Record<string, unknown>) {
+  if (!placesConfigured()) { logCrossCheckSkip("GOOGLE_PLACES_API_KEY not configured"); return; }
+  const day = String(payload.day ?? istDay());
+  for (const id of await selectCrossCheckTargets(Number(process.env.CROSSCHECK_PROSPECTS_PER_DAY ?? 15))) await enqueue("verify.crosscheck", { prospectId: id }, `verify.crosscheck:${id}:${day}`);
+}
