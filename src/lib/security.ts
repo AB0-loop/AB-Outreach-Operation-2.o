@@ -1,5 +1,4 @@
 import "server-only";
-import { timingSafeEqual } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { appEnvironment, requiredSecret } from "@/lib/env";
@@ -33,11 +32,5 @@ export async function rateLimit(request: Request, action: string, limit: number,
   const row = result.rows[0] as { count: number; expires_at: Date };
   if (Number(row.count) > limit) throw new Error("Too many requests");
   return { remaining: limit - Number(row.count), resetAt: row.expires_at };
-}
-export function verifyWebhookSignature(raw: string, signature: string | null) {
-  if (!signature) return false;
-  const expected = hmac(raw, "INBOUND_WEBHOOK_SECRET");
-  const a = Buffer.from(signature), b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
 }
 export const fingerprintPepper = () => requiredSecret("CONTACT_FINGERPRINT_PEPPER");
