@@ -30,3 +30,20 @@
 - Added an independent business-phone cross-check: daily refresh, manual trigger, demotion when a number stops matching, outcome-only storage, and cross-check figures in the daily report.
 - Hardened the job-claim test so it can't consume real queued work.
 - Tests: 33 unit/integration (three consecutive passing runs), 17-check E2E unchanged and passing.
+
+## 2026-11-06 — Option B with release-gate corrections
+
+- **Removed:** Gmail OAuth, message drafts, approvals for messages, dry-run and live send, mailbox and OAuth storage, the inbound webhook, sending settings, and email eligibility. Six empty tables were dropped after a restore-verified backup.
+- **Added:**
+  - partner pipeline (stage plus next follow-up);
+  - referral-to-consultation-to-order attribution with margin;
+  - callback dates (due follow-ups lead the call queue);
+  - corporate segment view;
+  - measured-count partner scorecard (no predictive score);
+  - contact evidence ladder;
+  - evidence `origin` (automated or human);
+  - test-data exclusion from all reporting.
+- **Fixed:** a "meeting booked" call no longer creates a customer consultation for the partner. The report renames "auto-qualified" to "contacts for review", which are not leads.
+- **Corrected:** four setup paraphrases are now labelled human-entered.
+- **Gate 3:** 8/8 contacts re-confirmed on their source pages.
+- **Tests:** 32 unit/integration (two runs); 25-check end-to-end.

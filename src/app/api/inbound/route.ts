@@ -1,7 +1,0 @@
-import { db } from "@/db";
-import { sources } from "@/db/schema";
-import { eq } from "drizzle-orm";
-import { jsonError } from "@/lib/api";
-import { createProspect, prospectInput } from "@/lib/prospect-service";
-import { verifyWebhookSignature } from "@/lib/security";
-export async function POST(request: Request) { const raw = await request.text(); try { if (!verifyWebhookSignature(raw, request.headers.get("x-aurum-signature"))) throw new Error("Webhook signature rejected"); const [source] = await db.select().from(sources).where(eq(sources.name, "Aurum website inbound")).limit(1); if (!source) throw new Error("Inbound source is not configured"); const body = JSON.parse(raw); const result = await createProspect(prospectInput.parse({ sourceId: source.id, displayName: body.name, city: body.city || "Bengaluru", category: "inbound", sourceUrl: body.sourceUrl || "https://aurumbespoke.com/", evidenceType: "need", excerpt: body.requirement || "Requested a private consultation through Aurum's booking pathway", summary: `Inbound consultation request: ${body.requirement || "requirement to confirm"}`, evidenceConfidence: 90, contact: body.email ? { channel: "email", value: body.email } : { channel: "phone", value: body.phone }, inbound: true, isTest: body.isTest === true }), null); return Response.json({ ok: true, reference: result.prospectId }, { status: 201 }); } catch (error) { return jsonError(error, "Inbound request rejected"); } }

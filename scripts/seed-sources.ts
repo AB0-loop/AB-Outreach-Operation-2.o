@@ -1,8 +1,7 @@
 import "dotenv/config";
 import { db, pool } from "../src/db";
-import { discoveryQueries, settings, sources } from "../src/db/schema";
+import { discoveryQueries, sources } from "../src/db/schema";
 async function main() {
-  await db.insert(settings).values({ key: "global" }).onConflictDoNothing();
   await db.insert(sources).values([
     { name: "Aurum website inbound", type: "inbound", baseUrl: "https://aurumbespoke.com/", checkUrl: "https://aurumbespoke.com/", access: "permitted", accessBasis: "Aurum-owned public site; booking records require authorised backend access", purpose: "Inbound consultation import" },
     { name: "First-party referral research", type: "referral", access: "manual_only", accessBasis: "Review each site and terms; never bulk-harvest contacts", purpose: "Evidence-backed partner research" },

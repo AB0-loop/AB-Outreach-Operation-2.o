@@ -1,0 +1,21 @@
+import Link from "next/link";
+import { AppShell } from "@/components/app-shell";
+import { partnerFunnel, partnerScorecard } from "@/lib/partner-metrics";
+import { pageUser } from "@/lib/page-auth";
+export const dynamic = "force-dynamic";
+const STAGES = ["contacted", "meeting_scheduled", "meeting_held", "agreed", "active", "paused", "declined"];
+
+export default async function Partners({ searchParams }: { searchParams: Promise<{ segment?: string }> }) {
+  const user = await pageUser(); const { segment } = await searchParams; const category = segment === "corporate" ? "corporate" : "referral_partner";
+  const [rows, funnel] = await Promise.all([partnerScorecard({ category }), partnerFunnel()]);
+  const count = (stage: string) => funnel.filter(f => f.category === category && f.partner_stage === stage).reduce((s, f) => s + f.n, 0);
+  const totals = rows.reduce((t, r) => ({ calls: t.calls + r.callsAttempted, answered: t.answered + r.callsAnswered, minutes: t.minutes + r.minutesSpent, referrals: t.referrals + r.referrals, orders: t.orders + r.ordersWon, revenue: t.revenue + r.revenueInr }), { calls: 0, answered: 0, minutes: 0, referrals: 0, orders: 0, revenue: 0 });
+  return <AppShell user={user}><div className="mx-auto max-w-[1300px]"><p className="eyebrow">Measured outcomes — no predictive score until real data accumulates</p><h1 className="mt-3 serif text-[36px]">Partner pipeline</h1>
+    <div className="mt-4 flex gap-2"><Link className={`btn ${category === "referral_partner" ? "btn-primary" : "btn-secondary"}`} href="/partners">Referral partners</Link><Link className={`btn ${category === "corporate" ? "btn-primary" : "btn-secondary"}`} href="/partners?segment=corporate">Corporate</Link></div>
+    <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-7">{STAGES.map(s => <div key={s} className="panel p-3"><p className="text-[8px] capitalize text-[#858b85]">{s.replaceAll("_", " ")}</p><p className="mt-1 text-xl font-semibold">{count(s)}</p></div>)}</div>
+    <p className="mt-3 text-[9px] text-[#6e756f]">Totals: {totals.calls} calls · {totals.answered} answered ({totals.calls ? Math.round(totals.answered / totals.calls * 100) : 0}% of {totals.calls}) · {totals.minutes} min spent · {totals.referrals} referrals · {totals.orders} orders won · ₹{totals.revenue.toLocaleString("en-IN")} attributed revenue. Test records excluded.</p>
+    <section className="panel mt-5 overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-[1100px]"><thead><tr><th className="p-3 text-left">Partner</th><th className="p-3 text-left">Stage</th><th className="p-3">Calls</th><th className="p-3">Answered</th><th className="p-3">Min</th><th className="p-3">Meetings held</th><th className="p-3">Agreed</th><th className="p-3">Referrals</th><th className="p-3">Consults done</th><th className="p-3">Orders won</th><th className="p-3">Revenue</th><th className="p-3">Margin</th><th className="p-3 text-left">Follow-up</th></tr></thead>
+      <tbody>{rows.map(r => <tr key={r.id}><td className="p-3"><Link className="font-semibold text-[#285b43]" href={`/prospects/${r.id}`}>{r.name}</Link></td><td className="p-3 capitalize">{r.stage.replaceAll("_", " ")}</td><td className="p-3 text-center">{r.callsAttempted}</td><td className="p-3 text-center">{r.callsAnswered}</td><td className="p-3 text-center">{r.minutesSpent}</td><td className="p-3 text-center">{r.meetings}</td><td className="p-3 text-center">{r.agreed ? "Yes" : "–"}</td><td className="p-3 text-center">{r.referrals}</td><td className="p-3 text-center">{r.consultationsCompleted}</td><td className="p-3 text-center">{r.ordersWon}</td><td className="p-3 text-right">₹{r.revenueInr.toLocaleString("en-IN")}</td><td className="p-3 text-right">{r.marginInr === null ? "cost not recorded" : `₹${r.marginInr.toLocaleString("en-IN")}`}</td><td className="p-3 text-[9px]">{r.nextFollowUpAt ? new Date(r.nextFollowUpAt).toLocaleString("en-IN") : "–"}</td></tr>)}
+      {!rows.length && <tr><td colSpan={13} className="p-10 text-center text-[9px] text-[#8a908b]">No partner activity yet. Partners appear here once they are called or moved past “not started”.</td></tr>}</tbody></table></div></section>
+  </div></AppShell>;
+}

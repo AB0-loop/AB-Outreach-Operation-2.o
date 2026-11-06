@@ -12,12 +12,14 @@ export function DiscoveryForm({ action }: { action: "add_query" | "add_website" 
 }
 export function CallLogForm({ contactId }: { contactId: string }) {
   const router = useRouter(); const [msg, setMsg] = useState("");
-  return <form className="mt-3 grid gap-2 md:grid-cols-[1fr_1.4fr_auto]" onSubmit={async e => { e.preventDefault(); const f = new FormData(e.currentTarget); const r = await apiFetch("/api/calls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ contactId, outcome: f.get("outcome"), dndChecked: f.get("dnd") === "on", notes: f.get("notes") || undefined }) }); const j = await r.json(); setMsg(r.ok ? "Logged" : j.error); if (r.ok) router.refresh(); }}>
-    <select className="field" name="outcome"><option value="no_answer">No answer</option><option value="connected_interested">Interested</option><option value="meeting_booked">Meeting booked</option><option value="callback_requested">Callback requested</option><option value="not_interested">Not interested</option><option value="wrong_number">Wrong number</option><option value="do_not_call">Asked not to be called</option></select>
-    <input className="field" name="notes" placeholder="Notes (who you spoke to, next step)" />
+  return <form className="mt-3 grid gap-2 md:grid-cols-[1fr_1fr_.5fr_auto]" onSubmit={async e => { e.preventDefault(); const f = new FormData(e.currentTarget); const when = String(f.get("followUpAt") || ""); const r = await apiFetch("/api/calls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ contactId, outcome: f.get("outcome"), dndChecked: f.get("dnd") === "on", durationMinutes: Number(f.get("minutes") || 0), followUpAt: when ? new Date(when).toISOString() : undefined, notes: f.get("notes") || undefined }) }); const j = await r.json(); setMsg(r.ok ? "Logged" : j.error); if (r.ok) router.refresh(); }}>
+    <select className="field" name="outcome"><option value="no_answer">No answer</option><option value="connected_interested">Spoke — interested</option><option value="callback_requested">Callback requested</option><option value="meeting_booked">Meeting booked</option><option value="not_interested">Not interested</option><option value="wrong_number">Wrong number</option><option value="do_not_call">Asked not to be called</option></select>
+    <input className="field" name="followUpAt" type="datetime-local" title="Callback / meeting date" />
+    <input className="field" name="minutes" type="number" min="0" max="600" placeholder="Min" />
     <button className="btn btn-primary">Log call</button>
-    <label className="flex items-center gap-2 text-[8px] md:col-span-3"><input type="checkbox" name="dnd" /> I checked DND/NCPR status and this is a business line or an inbound requester, per our calling policy</label>
-    {msg && <small className="text-[8px] md:col-span-3">{msg}</small>}
+    <input className="field md:col-span-4" name="notes" placeholder="Notes: who you spoke to, what was agreed" />
+    <label className="flex items-center gap-2 text-[8px] md:col-span-4"><input type="checkbox" name="dnd" /> I checked DND/NCPR status and this is a business line or an inbound requester, per our calling policy</label>
+    {msg && <small className="text-[8px] md:col-span-4">{msg}</small>}
   </form>;
 }
 export function EvidenceForm({ prospectId }: { prospectId: string }) {

@@ -63,3 +63,9 @@ Businesses already verified in the last 30 days are skipped. Deduplication uses 
 
 - Place Details with the phone field is Enterprise tier: 1,000 free requests a month, then about $20 per 1,000.
 - Defaults are 15 cross-checks a day with a hard cap of 25, so typical monthly use (about 450 discovery-time and refresh checks combined) stays within the free allowance.
+
+## 6 Nov 2026 corrections
+
+- Phone match outcomes are now shown as **"independently corroborated"**, never a bare "verified". See `docs/RELEASE-GATES.md` for the full ladder.
+- **Call queue order:** follow-ups due first; then people supplied by an enquiry; then human-confirmed or corroborated numbers; then by commercial fit.
+- **Excluded from the queue:** active, paused or declined partners, and numbers scheduled for a future follow-up.

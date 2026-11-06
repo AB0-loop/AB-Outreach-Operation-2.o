@@ -1,40 +1,52 @@
 import pg from 'pg';
-const base=process.env.E2E_BASE_URL||'http://127.0.0.1:3111';
-const email=`e2e-${Date.now()}@example.com`,password='E2E-correct-horse-battery-staple';
-const pool=new pg.Pool({connectionString:process.env.DATABASE_URL});
-let prospectId,messageId,mailboxId,importedProspectId,importedProspectId2;
-function cookieValues(response){return response.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ')}
-function csrf(cookie){return decodeURIComponent(cookie.split('; ').find(x=>x.startsWith('aurum_csrf='))?.split('=')[1]||'')}
-async function call(path,{method='GET',body,cookie,csrfToken}={}){const r=await fetch(base+path,{method,headers:{...(body?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{}),...(csrfToken?{'x-csrf-token':csrfToken}:{}),origin:base},body:body?JSON.stringify(body):undefined});let json={};try{json=await r.json()}catch{}return{r,json}}
-function expect(value,message){if(!value)throw new Error(message)}
-async function cleanup(){await pool.query("delete from aurum_acquisition.suppressions where (source in ('test','interaction') and reason in ('E2E suppression','Recipient opted out')) or (source='call' and prospect_id in (select id from aurum_acquisition.prospects where is_test))");if(importedProspectId2){await pool.query('delete from aurum_acquisition.suppressions where prospect_id=$1',[importedProspectId2]);await pool.query('delete from aurum_acquisition.prospects where id=$1',[importedProspectId2]);}if(messageId)await pool.query('delete from aurum_acquisition.send_attempts where message_id=$1',[messageId]);if(importedProspectId)await pool.query('delete from aurum_acquisition.prospects where id=$1',[importedProspectId]);if(prospectId){await pool.query("delete from aurum_acquisition.approvals where entity_id=$1 or entity_id=$2",[prospectId,messageId]);await pool.query('delete from aurum_acquisition.orders where prospect_id=$1',[prospectId]);await pool.query('delete from aurum_acquisition.consultations where prospect_id=$1',[prospectId]);await pool.query('delete from aurum_acquisition.prospects where id=$1',[prospectId]);}if(mailboxId)await pool.query('delete from aurum_acquisition.mailboxes where id=$1',[mailboxId]);await pool.query('delete from aurum_acquisition.users where email=$1',[email]);await pool.query("delete from aurum_acquisition.audit_events where metadata->>'e2e'='true' or summary like '%E2E%'");}
-try{
- await cleanup();
- let x=await call('/api/auth/bootstrap',{method:'POST',body:{email,displayName:'E2E Owner',password,bootstrapToken:process.env.ADMIN_BOOTSTRAP_TOKEN}});expect(x.r.status===200,`bootstrap ${x.r.status} ${JSON.stringify(x.json)}`);const cookie=cookieValues(x.r),token=csrf(cookie);expect(cookie.includes('aurum_session=')&&token,'cookies missing');
- x=await call('/api/prospects',{method:'POST',body:{},cookie:undefined});expect(x.r.status===401,'unauthorised mutation was not denied');
- const {rows:[source]}=await pool.query("select id from aurum_acquisition.sources where name='Aurum website inbound'");
- const prospect={sourceId:source.id,displayName:'E2E Inbound Fixture',city:'Bengaluru',category:'inbound',sourceUrl:'https://aurumbespoke.com/',evidenceType:'need',excerpt:'Controlled E2E consultation request fixture',summary:'Controlled E2E consultation request fixture',evidenceConfidence:95,contact:{channel:'email',value:email},inbound:true,isTest:true};
- x=await call('/api/prospects',{method:'POST',body:prospect,cookie,csrfToken:token});expect(x.r.status===201,`prospect ${x.r.status} ${JSON.stringify(x.json)}`);prospectId=x.json.prospectId;
- const duplicate=await call('/api/prospects',{method:'POST',body:prospect,cookie,csrfToken:token});expect(duplicate.r.status===400&&/Duplicate/.test(duplicate.json.error),'duplicate contact was accepted');
- let detail=await call(`/api/prospects/${prospectId}`,{cookie});const contactId=detail.json.contacts[0].id;
- x=await call('/api/approvals',{method:'POST',body:{entityType:'prospect',entityId:prospectId,decision:'approved',note:'E2E review'},cookie,csrfToken:token});expect(x.r.ok,'prospect approval failed');
- x=await call('/api/eligibility',{method:'POST',body:{prospectId,contactId,sourceUseAllowed:true,relationshipBasis:'inbound_request',legalReviewComplete:true,purpose:'Respond to requested consultation',validDays:30},cookie,csrfToken:token});expect(x.json.status==='eligible','exact contact not eligible');
- x=await call('/api/messages',{method:'POST',body:{prospectId,contactId,subject:'E2E consultation follow-up',bodyText:'Hello, this is a controlled E2E message that must never be sent.',claims:[]},cookie,csrfToken:token});expect(x.r.status===201,'message create failed');messageId=x.json.id;
- x=await call('/api/approvals',{method:'POST',body:{entityType:'message',entityId:messageId,decision:'approved',note:'E2E message review'},cookie,csrfToken:token});expect(x.r.ok,'message approval failed');
- x=await call(`/api/messages/${messageId}/dry-run`,{method:'POST',body:{idempotencyKey:`e2e:dry:${crypto.randomUUID()}`},cookie,csrfToken:token});expect(x.r.ok&&x.json.providerInvoked===false,'dry run could invoke provider');
- const {rows:[mailbox]}=await pool.query("insert into aurum_acquisition.mailboxes(email,status,scopes,encrypted_refresh_token,key_version) values($1,'connected','[]','never-decrypted','test') returning id",[`mailbox-${email}`]);mailboxId=mailbox.id;
- const {rows:[contact]}=await pool.query('select fingerprint from aurum_acquisition.contacts where id=$1',[contactId]);
- x=await call('/api/suppressions',{method:'POST',body:{contactFingerprint:contact.fingerprint,channel:'email',reason:'E2E suppression',source:'test'},cookie,csrfToken:token});expect(x.r.status===201,'suppression failed');
- const sendKey=`e2e:send:${crypto.randomUUID()}`;x=await call(`/api/messages/${messageId}/send`,{method:'POST',body:{mailboxId,idempotencyKey:sendKey},cookie,csrfToken:token});expect(x.r.status===409&&x.json.blockers.some(b=>/suppression/.test(b)),'suppressed live send was not blocked');
- const repeat=await call(`/api/messages/${messageId}/send`,{method:'POST',body:{mailboxId,idempotencyKey:sendKey},cookie,csrfToken:token});expect(repeat.r.status>=400,'repeated send request was accepted');
- x=await call('/api/interactions',{method:'POST',body:{prospectId,type:'opt_out',classification:'opt_out',channel:'email',body:'E2E opt-out',occurredAt:new Date().toISOString()},cookie,csrfToken:token});expect(x.r.status===201,'opt out failed');
- x=await call('/api/consultations',{method:'POST',body:{prospectId,status:'booked',scheduledAt:new Date(Date.now()+86400000).toISOString(),location:'Controlled test',sourceAttribution:'E2E inbound'},cookie,csrfToken:token});expect(x.r.status===201,'consultation failed');
- x=await call('/api/orders',{method:'POST',body:{prospectId,status:'confirmed',description:'E2E test suit',quotedInr:100000,revenueInr:50000,orderedAt:new Date().toISOString()},cookie,csrfToken:token});expect(x.r.status===201,'order failed');
- const {rows:[refSource]}=await pool.query("select id from aurum_acquisition.sources where name='First-party referral research'");
- x=await call('/api/prospects',{method:'POST',body:{sourceId:refSource.id,displayName:'E2E Call Partner',organisation:'E2E Call Partner',city:'Bengaluru',category:'referral_partner',sourceUrl:'https://example.com/contact',evidenceType:'commercial_relevance',excerpt:'Controlled E2E wedding planner fixture',summary:'Controlled E2E wedding planner fixture',evidenceConfidence:80,contact:{channel:'phone',value:'+918041230000'},isTest:true},cookie,csrfToken:token});expect(x.r.status===201,'call fixture failed');importedProspectId2=x.json.prospectId;const callContact=x.json.contactId;
- x=await call('/api/calls',{method:'POST',body:{contactId:callContact,outcome:'no_answer',dndChecked:false},cookie,csrfToken:token});expect(x.r.status===400,'call logged without DND confirmation');
- x=await call('/api/calls',{method:'POST',body:{contactId:callContact,outcome:'do_not_call',dndChecked:true,notes:'E2E'},cookie,csrfToken:token});expect(x.r.status===201,'call log failed');
- x=await call('/api/calls',{method:'POST',body:{contactId:callContact,outcome:'no_answer',dndChecked:true},cookie,csrfToken:token});expect(x.r.status===400&&/suppressed/.test(x.json.error),'suppressed number could be logged again');
- const {rows:[sent]}=await pool.query("select count(*)::int n from aurum_acquisition.send_attempts where message_id=$1 and status='sent'",[messageId]);expect(sent.n===0,'a real send was recorded');
- console.log(JSON.stringify({ok:true,checks:17,providerInvoked:false,realSends:0}));
-} finally {await cleanup();await pool.end();}
+const base = process.env.E2E_BASE_URL || 'http://127.0.0.1:3111';
+const email = `e2e-${Date.now()}@example.com`, password = 'E2E-correct-horse-battery-staple';
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+let checks = 0;
+const cookieValues = r => r.headers.getSetCookie().map(x => x.split(';')[0]).join('; ');
+const csrf = c => decodeURIComponent(c.split('; ').find(x => x.startsWith('aurum_csrf='))?.split('=')[1] || '');
+async function call(path, { method = 'GET', body, cookie, token, raw } = {}) {
+  const r = await fetch(base + path, { method, headers: { ...(body ? { 'content-type': raw ? 'text/csv' : 'application/json' } : {}), ...(cookie ? { cookie } : {}), ...(token ? { 'x-csrf-token': token } : {}), origin: base }, body: body ? (raw ? body : JSON.stringify(body)) : undefined });
+  let json = {}; try { json = await r.json(); } catch { /* non-JSON */ } return { r, json };
+}
+function expect(v, m) { if (!v) throw new Error(m); checks++; }
+async function cleanup() {
+  const tp = "select id from aurum_acquisition.prospects where is_test";
+  await pool.query(`delete from aurum_acquisition.orders where prospect_id in (${tp}) or referred_by_partner_id in (${tp})`);
+  await pool.query(`delete from aurum_acquisition.consultations where prospect_id in (${tp}) or referred_by_partner_id in (${tp})`);
+  await pool.query(`delete from aurum_acquisition.suppressions where prospect_id in (${tp})`);
+  await pool.query(`delete from aurum_acquisition.audit_events where entity_id in (select id::text from aurum_acquisition.prospects where is_test) or actor_id in (select id from aurum_acquisition.users where email like 'e2e-%@example.com')`);
+  await pool.query(`delete from aurum_acquisition.approvals where entity_id in (${tp})`);
+  await pool.query(`delete from aurum_acquisition.prospects where is_test`);
+  await pool.query(`delete from aurum_acquisition.users where email like 'e2e-%@example.com'`);
+}
+try {
+  await cleanup();
+  let x = await call('/api/auth/bootstrap', { method: 'POST', body: { email, displayName: 'E2E Owner', password, bootstrapToken: process.env.ADMIN_BOOTSTRAP_TOKEN } });
+  expect(x.r.status === 200, `bootstrap ${x.r.status} ${JSON.stringify(x.json)}`);
+  const cookie = cookieValues(x.r), token = csrf(cookie); expect(cookie.includes('aurum_session=') && token, 'session/CSRF cookies missing');
+  x = await call('/api/prospects', { method: 'POST', body: {} }); expect(x.r.status === 401, 'unauthenticated mutation not denied');
+  x = await call('/api/prospects', { method: 'POST', body: {}, cookie }); expect(x.r.status === 403, 'mutation without CSRF token not denied');
+  for (const p of ['/api/messages', '/api/inbound', '/api/integrations/gmail/connect', '/api/settings', '/api/eligibility']) { const r = await fetch(base + p, { method: 'POST' }); expect(r.status === 404, `removed route ${p} still responds ${r.status}`); }
+  const { rows: [src] } = await pool.query("select id from aurum_acquisition.sources where name='First-party referral research'");
+  const partnerBody = { sourceId: src.id, displayName: 'E2E Planner Fixture', organisation: 'E2E Planner Fixture', city: 'Bengaluru', category: 'referral_partner', sourceUrl: 'https://example.com/e2e', evidenceType: 'commercial_relevance', excerpt: 'Controlled E2E wedding planner fixture', summary: 'Controlled E2E wedding planner fixture', evidenceConfidence: 80, contact: { channel: 'phone', value: '+918041239999' }, isTest: true };
+  x = await call('/api/prospects', { method: 'POST', body: partnerBody, cookie, token }); expect(x.r.status === 201, `partner create ${x.r.status} ${JSON.stringify(x.json)}`);
+  const partnerId = x.json.prospectId, contactId = x.json.contactId;
+  x = await call('/api/prospects', { method: 'POST', body: partnerBody, cookie, token }); expect(x.r.status === 400 && /Duplicate/.test(x.json.error), 'duplicate contact accepted');
+  x = await call('/api/import', { method: 'POST', raw: true, body: 'name,category,source_url,evidence,is_test\nE2E CSV Partner,referral_partner,https://example.com,Controlled CSV referral evidence,true', cookie, token }); expect(x.r.status === 200 && x.json.imported === 1, 'CSV import failed');
+  x = await call('/api/calls', { method: 'POST', body: { contactId, outcome: 'no_answer', dndChecked: false }, cookie, token }); expect(x.r.status === 400, 'call logged without DND confirmation');
+  x = await call('/api/calls', { method: 'POST', body: { contactId, outcome: 'callback_requested', dndChecked: true }, cookie, token }); expect(x.r.status === 400 && /date/.test(x.json.error), 'callback without date accepted');
+  x = await call('/api/calls', { method: 'POST', body: { contactId, outcome: 'callback_requested', dndChecked: true, durationMinutes: 4, followUpAt: new Date(Date.now() - 60000).toISOString(), notes: 'E2E' }, cookie, token }); expect(x.r.status === 201, 'callback log failed');
+  let { rows: [pr] } = await pool.query('select partner_stage, next_follow_up_at from aurum_acquisition.prospects where id=$1', [partnerId]); expect(pr.partner_stage === 'contacted' && pr.next_follow_up_at, 'call did not advance stage or set follow-up');
+  for (const stage of ['meeting_held', 'agreed']) { x = await call('/api/partners', { method: 'PATCH', body: { prospectId: partnerId, stage, note: 'E2E' }, cookie, token }); expect(x.r.ok, `stage ${stage} failed`); }
+  x = await call('/api/referrals', { method: 'POST', body: { partnerId, customerName: 'E2E Referred Customer', customerPhone: '+919845099999', requirement: 'Wedding sherwani', status: 'completed' }, cookie, token }); expect(x.r.status === 201, `referral ${x.r.status} ${JSON.stringify(x.json)}`);
+  const { customerId, consultationId } = x.json;
+  x = await call('/api/orders', { method: 'POST', body: { prospectId: customerId, consultationId, status: 'confirmed', description: 'E2E sherwani', quotedInr: 90000, revenueInr: 50000, costInr: 20000 }, cookie, token }); expect(x.r.status === 201 && x.json.referredByPartnerId === partnerId, 'order not attributed to referring partner');
+  x = await call('/api/partners', { cookie }); expect(x.r.ok && !x.json.rows.some(r => r.id === partnerId), 'test partner leaked into default scorecard');
+  x = await call('/api/partners?includeTest=1', { cookie }); const row = x.json.rows.find(r => r.id === partnerId);
+  expect(row && row.callsAttempted === 1 && row.callsAnswered === 1 && row.minutesSpent === 4 && row.meetings === 1 && row.referrals === 1 && row.consultationsCompleted === 1 && row.ordersWon === 1 && row.revenueInr === 50000 && row.marginInr === 30000 && row.stage === 'active', `scorecard wrong: ${JSON.stringify(row)}`);
+  x = await call('/api/calls', { method: 'POST', body: { contactId, outcome: 'do_not_call', dndChecked: true }, cookie, token }); expect(x.r.status === 201, 'do-not-call log failed');
+  x = await call('/api/calls', { method: 'POST', body: { contactId, outcome: 'no_answer', dndChecked: true }, cookie, token }); expect(x.r.status === 400 && /suppressed/.test(x.json.error), 'suppressed number accepted');
+  const h = await fetch(base + '/api/health'); expect(h.ok, 'health failed');
+  console.log(JSON.stringify({ ok: true, checks, emailSendingRoutes: 'removed (404)', testDataInDefaultReports: false }));
+} finally { await cleanup(); await pool.end(); }

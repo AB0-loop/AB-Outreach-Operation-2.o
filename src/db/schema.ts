@@ -13,16 +13,13 @@ export const prospectStage = acquisition.enum("prospect_stage", ["discovered", "
 export const evidenceType = acquisition.enum("evidence_type", ["identity", "role", "location", "commercial_relevance", "need", "timing", "contact", "source_policy"]);
 export const contactChannel = acquisition.enum("contact_channel", ["email", "phone", "whatsapp", "web_form"]);
 export const verificationStatus = acquisition.enum("verification_status", ["unverified", "published_unverified", "self_provided", "verified", "invalid", "stale"]);
-export const eligibilityStatus = acquisition.enum("eligibility_status", ["pending", "eligible", "ineligible", "needs_review"]);
 export const approvalDecision = acquisition.enum("approval_decision", ["approved", "rejected", "changes_requested", "revoked"]);
 export const entityType = acquisition.enum("entity_type", ["prospect", "message"]);
-export const messageStatus = acquisition.enum("message_status", ["draft", "review", "approved", "rejected", "scheduled", "sent"]);
-export const sendStatus = acquisition.enum("send_status", ["dry_run", "queued", "sending", "sent", "blocked", "failed"]);
-export const sendingMode = acquisition.enum("sending_mode", ["disabled", "dry_run", "live"]);
-export const mailboxStatus = acquisition.enum("mailbox_status", ["connected", "revoked", "error"]);
 export const interactionType = acquisition.enum("interaction_type", ["inbound", "outbound", "reply", "note", "bounce", "complaint", "opt_out"]);
 export const replyClass = acquisition.enum("reply_class", ["interested", "not_now", "not_interested", "opt_out", "referral", "bounce", "unknown"]);
 export const consultationStatus = acquisition.enum("consultation_status", ["proposed", "booked", "completed", "cancelled", "no_show"]);
+export const partnerStage = acquisition.enum("partner_stage", ["not_started", "contacted", "meeting_scheduled", "meeting_held", "agreed", "active", "paused", "declined"]);
+export const evidenceOrigin = acquisition.enum("evidence_origin", ["automated_extraction", "human_entry"]);
 export const orderStatus = acquisition.enum("order_status", ["quoted", "confirmed", "in_progress", "completed", "cancelled"]);
 
 export const users = acquisition.table("users", {
@@ -54,16 +51,6 @@ export const rateLimits = acquisition.table("rate_limits", {
   count: integer("count").notNull().default(1),
 }, t => [uniqueIndex("rate_limits_key_action_uq").on(t.keyHash, t.action), check("rate_limits_count_ck", sql`${t.count} >= 0`)]);
 
-export const settings = acquisition.table("settings", {
-  key: text("key").primaryKey().default("global"),
-  mode: sendingMode("mode").notNull().default("disabled"),
-  killSwitch: boolean("kill_switch").notNull().default(true),
-  globalDailyCap: integer("global_daily_cap").notNull().default(5),
-  mailboxDailyCap: integer("mailbox_daily_cap").notNull().default(5),
-  aiMonthlyBudgetUsd: numeric("ai_monthly_budget_usd", { precision: 10, scale: 2 }).notNull().default("0"),
-  updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, t => [check("settings_global_cap_ck", sql`${t.globalDailyCap} between 0 and 100`), check("settings_mailbox_cap_ck", sql`${t.mailboxDailyCap} between 0 and 100`)]);
 
 export const sources = acquisition.table("sources", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -126,6 +113,9 @@ export const prospects = acquisition.table("prospects", {
   lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
   isTest: boolean("is_test").notNull().default(false),
   externalKey: text("external_key"),
+  partnerStage: partnerStage("partner_stage").notNull().default("not_started"),
+  partnerStageUpdatedAt: timestamp("partner_stage_updated_at", { withTimezone: true }),
+  nextFollowUpAt: timestamp("next_follow_up_at", { withTimezone: true }),
   website: text("website"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -142,6 +132,7 @@ export const evidence = acquisition.table("evidence", {
   contentHash: text("content_hash").notNull(),
   confidence: integer("confidence").notNull(),
   supportsCommercialRelevance: boolean("supports_commercial_relevance").notNull().default(false),
+  origin: evidenceOrigin("origin").notNull().default("automated_extraction"),
   discoveredAt: timestamp("discovered_at", { withTimezone: true }).notNull().defaultNow(),
   verifiedAt: timestamp("verified_at", { withTimezone: true }).notNull().defaultNow(),
   staleAfter: timestamp("stale_after", { withTimezone: true }).notNull(),
@@ -190,19 +181,6 @@ export const assessments = acquisition.table("assessments", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, t => [index("assessments_prospect_idx").on(t.prospectId, t.createdAt), check("assessments_identity_ck", sql`${t.identityConfidence} between 0 and 100`), check("assessments_fit_ck", sql`${t.commercialFit} between 0 and 100`)]);
 
-export const eligibilityChecks = acquisition.table("eligibility_checks", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  prospectId: uuid("prospect_id").notNull().references(() => prospects.id, { onDelete: "cascade" }),
-  contactId: uuid("contact_id").notNull().references(() => contacts.id, { onDelete: "cascade" }),
-  status: eligibilityStatus("status").notNull(),
-  purpose: text("purpose").notNull(),
-  relationshipBasis: text("relationship_basis").notNull(),
-  sourceUseAllowed: boolean("source_use_allowed").notNull(),
-  reasons: jsonb("reasons").$type<string[]>().notNull(),
-  checkedBy: uuid("checked_by").references(() => users.id, { onDelete: "set null" }),
-  validUntil: timestamp("valid_until", { withTimezone: true }).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, t => [index("eligibility_contact_created_idx").on(t.contactId, t.createdAt), index("eligibility_expiry_idx").on(t.validUntil)]);
 
 export const suppressions = acquisition.table("suppressions", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -218,18 +196,6 @@ export const suppressions = acquisition.table("suppressions", {
   liftedBy: uuid("lifted_by").references(() => users.id, { onDelete: "set null" }),
 }, t => [index("suppressions_prospect_active_idx").on(t.prospectId, t.active), index("suppressions_fingerprint_active_idx").on(t.contactFingerprint, t.active)]);
 
-export const messageDrafts = acquisition.table("message_drafts", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  prospectId: uuid("prospect_id").notNull().references(() => prospects.id, { onDelete: "cascade" }),
-  contactId: uuid("contact_id").notNull().references(() => contacts.id, { onDelete: "restrict" }),
-  subject: text("subject").notNull(),
-  bodyText: text("body_text").notNull(),
-  claimEvidence: jsonb("claim_evidence").$type<Array<{ claim: string; evidenceId: string }>>().notNull(),
-  status: messageStatus("status").notNull().default("draft"),
-  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, t => [index("message_status_idx").on(t.status)]);
 
 export const approvals = acquisition.table("approvals", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -241,44 +207,8 @@ export const approvals = acquisition.table("approvals", {
   decidedAt: timestamp("decided_at", { withTimezone: true }).notNull().defaultNow(),
 }, t => [index("approvals_entity_idx").on(t.entityType, t.entityId, t.decidedAt)]);
 
-export const mailboxes = acquisition.table("mailboxes", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  email: text("email").notNull(),
-  provider: text("provider").notNull().default("gmail"),
-  status: mailboxStatus("status").notNull(),
-  scopes: jsonb("scopes").$type<string[]>().notNull(),
-  encryptedRefreshToken: text("encrypted_refresh_token").notNull(),
-  keyVersion: text("key_version").notNull(),
-  connectedBy: uuid("connected_by").references(() => users.id, { onDelete: "set null" }),
-  lastError: text("last_error"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, t => [uniqueIndex("mailboxes_email_uq").on(t.email)]);
 
-export const oauthStates = acquisition.table("oauth_states", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  stateHash: text("state_hash").notNull(),
-  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  encryptedVerifier: text("encrypted_verifier").notNull(),
-  redirectUri: text("redirect_uri").notNull(),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  consumedAt: timestamp("consumed_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, t => [uniqueIndex("oauth_state_uq").on(t.stateHash)]);
 
-export const sendAttempts = acquisition.table("send_attempts", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  messageId: uuid("message_id").notNull().references(() => messageDrafts.id, { onDelete: "restrict" }),
-  contactId: uuid("contact_id").notNull().references(() => contacts.id, { onDelete: "restrict" }),
-  mailboxId: uuid("mailbox_id").references(() => mailboxes.id, { onDelete: "set null" }),
-  idempotencyKey: text("idempotency_key").notNull(),
-  status: sendStatus("status").notNull(),
-  providerMessageId: text("provider_message_id"),
-  blockers: jsonb("blockers").$type<string[]>(),
-  error: text("error"),
-  attemptedAt: timestamp("attempted_at", { withTimezone: true }).notNull().defaultNow(),
-  sentAt: timestamp("sent_at", { withTimezone: true }),
-}, t => [uniqueIndex("send_idempotency_uq").on(t.idempotencyKey), index("send_message_idx").on(t.messageId, t.attemptedAt)]);
 
 export const interactions = acquisition.table("interactions", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -302,6 +232,7 @@ export const consultations = acquisition.table("consultations", {
   location: text("location"),
   notes: text("notes"),
   sourceAttribution: text("source_attribution").notNull(),
+  referredByPartnerId: uuid("referred_by_partner_id").references(() => prospects.id, { onDelete: "set null" }),
   createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -315,12 +246,14 @@ export const orders = acquisition.table("orders", {
   description: text("description").notNull(),
   quotedInr: numeric("quoted_inr", { precision: 12, scale: 2 }).notNull().default("0"),
   revenueInr: numeric("revenue_inr", { precision: 12, scale: 2 }).notNull().default("0"),
+  costInr: numeric("cost_inr", { precision: 12, scale: 2 }),
+  referredByPartnerId: uuid("referred_by_partner_id").references(() => prospects.id, { onDelete: "set null" }),
   orderedAt: timestamp("ordered_at", { withTimezone: true }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, t => [index("orders_status_idx").on(t.status), check("orders_amounts_ck", sql`${t.quotedInr} >= 0 and ${t.revenueInr} >= 0`)]);
+}, t => [index("orders_status_idx").on(t.status), check("orders_amounts_ck", sql`${t.quotedInr} >= 0 and ${t.revenueInr} >= 0 and coalesce(${t.costInr}, 0) >= 0`), index("orders_partner_idx").on(t.referredByPartnerId)]);
 
 export const costs = acquisition.table("costs", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -381,7 +314,9 @@ export const callLogs = acquisition.table("call_logs", {
   contactId: uuid("contact_id").notNull().references(() => contacts.id, { onDelete: "cascade" }),
   outcome: text("outcome").notNull(),
   dndChecked: boolean("dnd_checked").notNull(),
+  durationMinutes: integer("duration_minutes").notNull().default(0),
+  followUpAt: timestamp("follow_up_at", { withTimezone: true }),
   notes: text("notes"),
   calledBy: uuid("called_by").notNull().references(() => users.id, { onDelete: "restrict" }),
   calledAt: timestamp("called_at", { withTimezone: true }).notNull().defaultNow(),
-}, t => [index("call_logs_contact_idx").on(t.contactId, t.calledAt), check("call_logs_dnd_ck", sql`${t.dndChecked} = true`)]);
+}, t => [index("call_logs_contact_idx").on(t.contactId, t.calledAt), check("call_logs_dnd_ck", sql`${t.dndChecked} = true`), check("call_logs_duration_ck", sql`${t.durationMinutes} between 0 and 600`)]);

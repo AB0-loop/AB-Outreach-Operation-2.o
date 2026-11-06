@@ -1,8 +1,0 @@
-import { and, eq, inArray } from "drizzle-orm";
-import { db } from "@/db";
-import { auditEvents, contacts, evidence, messageDrafts } from "@/db/schema";
-import { assertCsrf, requireAny } from "@/lib/auth";
-import { jsonError } from "@/lib/api";
-import { assertEvidenceClaims, draftInput } from "@/lib/message";
-import { assertOrigin } from "@/lib/security";
-export async function POST(request: Request) { try { assertOrigin(request); const user = await requireAny(["owner", "admin", "researcher", "operator"]); assertCsrf(request, user); const data = draftInput.parse(await request.json()); assertEvidenceClaims(data.claims); const [contact] = await db.select().from(contacts).where(and(eq(contacts.id, data.contactId), eq(contacts.prospectId, data.prospectId))).limit(1); if (!contact) throw new Error("Contact does not belong to prospect"); const ids = data.claims.map(x => x.evidenceId); if (ids.length) { const rows = await db.select({ id: evidence.id }).from(evidence).where(and(eq(evidence.prospectId, data.prospectId), inArray(evidence.id, ids))); if (rows.length !== new Set(ids).size) throw new Error("A claim references evidence from another prospect"); } const [draft] = await db.insert(messageDrafts).values({ prospectId: data.prospectId, contactId: data.contactId, subject: data.subject, bodyText: data.bodyText, claimEvidence: data.claims, status: "review", createdBy: user.id }).returning(); await db.insert(auditEvents).values({ actorId: user.id, action: "message.created", entityType: "message", entityId: draft.id, summary: "Message draft created for review" }); return Response.json({ ok: true, id: draft.id }, { status: 201 }); } catch (error) { return jsonError(error, "Message creation failed"); } }
