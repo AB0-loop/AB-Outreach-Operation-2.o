@@ -69,3 +69,14 @@ Businesses already verified in the last 30 days are skipped. Deduplication uses 
 - Phone match outcomes are now shown as **"independently corroborated"**, never a bare "verified". See `docs/RELEASE-GATES.md` for the full ladder.
 - **Call queue order:** follow-ups due first; then people supplied by an enquiry; then human-confirmed or corroborated numbers; then by commercial fit.
 - **Excluded from the queue:** active, paused or declined partners, and numbers scheduled for a future follow-up.
+
+## Daily 24-Hour PDF Report & Telegram Delivery
+
+- **PDF Generation (`src/lib/pdf-report.ts`):** Every 24 hours (`report.daily`), the worker compiles a multi-page PDF-1.4 brief (`aurum-outreach-YYYY-MM-DD.pdf`) directly from live PostgreSQL records:
+  1. 24-hour summary and 5-rung contact evidence ladder breakdown.
+  2. Prioritised human cold-calling queue (business lines and inbound requesters only, with TRAI/DND disclosure).
+  3. Complete discovered Bengaluru client & partner directory with websites, phones, MX-checked emails, and verbatim source excerpts.
+- **Telegram Delivery (`src/lib/telegram.ts`):**
+  - Sends the generated PDF via `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument` to `TELEGRAM_CHAT_ID`.
+  - Enforces once-per-24-hours idempotency via `daily_reports.telegram_sent_at` so repeated worker runs on the same day never send duplicate PDFs unless explicitly forced.
+  - Fails closed when `TELEGRAM_BOT_TOKEN` or `TELEGRAM_CHAT_ID` is unset, recording `pdf_generated_telegram_unconfigured` while still archiving the PDF byte count and serving the PDF at `GET /api/reports/daily-pdf?day=YYYY-MM-DD`.

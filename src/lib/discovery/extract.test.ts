@@ -36,5 +36,7 @@ describe("first-party contact extraction", () => {
     const robots = "User-agent: *\nDisallow: /private\nAllow: /private/contact";
     expect(robotsAllowed(robots, "/private/x")).toBe(false); expect(robotsAllowed(robots, "/private/contact")).toBe(true); expect(robotsAllowed(robots, "/contact")).toBe(true);
     expect(robotsAllowed("User-agent: *\nDisallow: /", "/contact")).toBe(false);
+    expect(robotsAllowed("User-agent: *\nDisallow: /*?\nDisallow: /wp-admin/", "/")).toBe(true);
+    expect(robotsAllowed("User-agent: *\nDisallow: /*?", "/page?x=1")).toBe(false);
   });
 });

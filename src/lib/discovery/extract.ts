@@ -42,7 +42,7 @@ export function extractPhones(html: string, text = htmlToText(html)): FoundPhone
   for (const re of [MOBILE, LANDLINE]) for (const m of text.matchAll(re)) add(m[0], excerptAround(text, m.index ?? 0));
   return [...found.values()];
 }
-const ROLE = /^(info|hello|contact|enquir(y|ies)|inquir(y|ies)|sales|events?|weddings?|admin|office|support|bookings?|team|connect|reservations|partnerships?|marketing)[0-9._-]*@/;
+const ROLE = /^(info|hello|contact|enquir(y|ies)|inquir(y|ies)|sales|events?|weddings?|admin|office|support|bookings?|team|connect|reservations|partnerships?|marketing|director|studio|gethitched|care|customercare|concierge|help|media|press)[0-9._-]*@/;
 export const classifyEmail = (email: string) => ROLE.test(email) ? "role_email" : "named_email";
 const TERMS: Array<[RegExp, string, number]> = [
   [/\bgroom(s|'s)?\b/i, "groom", 4], [/\bsherwani/i, "sherwani", 5], [/\bbandhgala/i, "bandhgala", 5], [/\bmenswear|men'?s wear|men'?s styling/i, "menswear", 5],
@@ -57,13 +57,17 @@ export function relevanceSignals(text: string): Signal[] {
 }
 export function mentionsBengaluru(text: string) { const m = /\b(bengaluru|bangalore)\b/i.exec(text); return m ? excerptAround(text, m.index) : null; }
 export const compact = (v: string) => v.toLowerCase().replace(/&amp;/g, "&").replace(/[^a-z0-9]/g, "");
+const GENERIC_SEO = /^(?:(?:best|top|luxury)\s+)?(?:wedding\s+(?:venues?|planners?|photographers?)|event\s+management\s+company|corporate\s+event\s+(?:management|organisers?))(?:\s+in\s+(?:bangalore|bengaluru|india))?$/i;
 export function siteName(html: string, fallback: string) {
   const meta = (attr: string) => new RegExp(`<meta[^>]+(?:property|name)=["']${attr}["'][^>]+content=["']([^"']{2,100})["']`, "i").exec(html)?.[1];
   const ld = [...html.matchAll(/"@type"\s*:\s*"(?:Organization|LocalBusiness|WeddingPlanner|ProfessionalService|EventVenue)"[^{}]{0,400}?"name"\s*:\s*"([^"]{2,100})"/gi)].map(m => m[1]);
   const titleParts = (/<title[^>]*>([^<]{2,200})<\/title>/i.exec(html)?.[1] ?? "").split(/\s[|\-–—:]\s/);
-  const candidates = [meta("og:site_name"), meta("application-name"), ...ld, ...titleParts].filter((c): c is string => !!c && c.trim().length >= 2).map(c => c.replace(/&amp;/g, "&").trim());
+  const cleanTitle = (s: string) => s.replace(/&amp;/g, "&").split(/\s[|\-–—:]\s/)[0].replace(/^(?:contact(?:\s+us)?|book|welcome\s+to)\s+/i, "").replace(/\s+for\s+wedding\s+photography$/i, " Photography").replace(/[\s\-–—:|]+$/g, "").trim();
+  const candidates = [meta("og:site_name"), meta("application-name"), ...ld, ...titleParts]
+    .filter((c): c is string => !!c && c.trim().length >= 2)
+    .map(cleanTitle)
+    .filter(c => c.length >= 2 && !GENERIC_SEO.test(c) && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(c));
   const label = compact(fallback.split(".")[0]);
-  // Prefer a candidate that is the brand on the domain (e.g. "The Tamarind Tree" for thetamarindtree.in) over SEO titles.
   const brand = candidates.find(c => { const k = compact(c); return k.length >= 4 && (label.includes(k) || k.includes(label)); });
   return (brand ?? candidates[0] ?? fallback).slice(0, 120);
 }

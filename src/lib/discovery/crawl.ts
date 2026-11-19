@@ -35,7 +35,11 @@ export function robotsAllowed(robots: string, path: string) {
     else if (applies && key === "disallow" && v) disallow.push(v);
     else if (applies && key === "allow" && v) allow.push(v);
   }
-  const longest = (list: string[]) => Math.max(-1, ...list.filter(p => path.startsWith(p.replace(/\*.*$/, ""))).map(p => p.length));
+  const matches = (pattern: string) => {
+    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+    return new RegExp(`^${escaped}`).test(path);
+  };
+  const longest = (list: string[]) => Math.max(-1, ...list.filter(matches).map(p => p.length));
   return longest(allow) >= longest(disallow);
 }
 export async function crawlSite(start: string, maxPages = 4) {

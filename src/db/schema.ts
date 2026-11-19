@@ -153,6 +153,11 @@ export const contacts = acquisition.table("contacts", {
   staleAfter: timestamp("stale_after", { withTimezone: true }),
   kind: text("kind").notNull().default("unknown"),
   corroborated: boolean("corroborated").notNull().default(false),
+  formatValid: boolean("format_valid").notNull().default(false),
+  domainMailEnabled: boolean("domain_mail_enabled").notNull().default(false),
+  sourcePublished: boolean("source_published").notNull().default(false),
+  independentlyCorroborated: boolean("independently_corroborated").notNull().default(false),
+  humanConfirmed: boolean("human_confirmed").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, t => [uniqueIndex("contacts_prospect_fingerprint_uq").on(t.prospectId, t.fingerprint), index("contacts_fingerprint_idx").on(t.fingerprint)]);
 
@@ -302,9 +307,39 @@ export const contactVerifications = acquisition.table("contact_verifications", {
   checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
 }, t => [index("contact_verifications_contact_idx").on(t.contactId, t.checkedAt)]);
 
+export const crosscheckVerdict = acquisition.enum("crosscheck_verdict", ["match", "mismatch", "no_phone_listed", "place_not_found", "provider_unavailable"]);
+
+export const placeReferences = acquisition.table("place_references", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  prospectId: uuid("prospect_id").notNull().references(() => prospects.id, { onDelete: "cascade" }),
+  placeId: text("place_id").notNull(),
+  placeIdCapturedAt: timestamp("place_id_captured_at", { withTimezone: true }).notNull().defaultNow(),
+  cachedLat: numeric("cached_lat", { precision: 9, scale: 6 }),
+  cachedLng: numeric("cached_lng", { precision: 9, scale: 6 }),
+  coordinateCacheExpiresAt: timestamp("coordinate_cache_expires_at", { withTimezone: true }),
+  attribution: text("attribution").notNull().default("Powered by Google"),
+  lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, t => [uniqueIndex("place_reference_uq").on(t.prospectId, t.placeId), index("place_cache_expiry_idx").on(t.coordinateCacheExpiresAt)]);
+
+export const phoneCrosschecks = acquisition.table("phone_crosschecks", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  contactId: uuid("contact_id").notNull().references(() => contacts.id, { onDelete: "cascade" }),
+  placeReferenceId: uuid("place_reference_id").references(() => placeReferences.id, { onDelete: "set null" }),
+  source: text("source").notNull().default("google_places"),
+  verdict: crosscheckVerdict("verdict").notNull(),
+  detail: text("detail").notNull(),
+  attribution: text("attribution").notNull().default("Powered by Google"),
+  checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+}, t => [index("phone_crosscheck_contact_idx").on(t.contactId, t.checkedAt)]);
+
 export const dailyReports = acquisition.table("daily_reports", {
   day: text("day").primaryKey(),
   summary: jsonb("summary").$type<Record<string, unknown>>().notNull(),
+  pdfBytes: integer("pdf_bytes"),
+  telegramSentAt: timestamp("telegram_sent_at", { withTimezone: true }),
+  telegramMessageId: text("telegram_message_id"),
+  telegramStatus: text("telegram_status"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

@@ -36,6 +36,7 @@ export async function processWebsite(task: WebsiteTask): Promise<WebsiteResult> 
   const phoneFinds = crawl.pages.flatMap(p => extractPhones(p.html, p.text).map(ph => ({ ...ph, page: p.url })));
   const emails = [...new Map(emailFinds.map(e => [e.value, e])).values()].slice(0, 6);
   const phones = [...new Map(phoneFinds.map(p => [p.e164, p])).values()].slice(0, 6);
+  if (!emails.length && !phones.length) return { status: "rejected", reason: "no published business phone or email on first-party site" };
   const emailChecks = await Promise.all(emails.map(e => checkEmailDomain(e.value, root)));
   const corroboratedCount = phones.filter(p => p.e164 === placesPhone).length;
 
@@ -70,8 +71,10 @@ export async function processWebsite(task: WebsiteTask): Promise<WebsiteResult> 
       const other = await tx.select({ id: contacts.id }).from(contacts).where(and(eq(contacts.fingerprint, fingerprint), ne(contacts.prospectId, prospectId!))).limit(1);
       if (other.length) { duplicateContacts++; return; }
       const evidenceId = await addEvidence("contact", page, excerpt, `${channel === "email" ? "Email" : "Phone"} published on the business's own website.`, 80);
-      const [row] = await tx.insert(contacts).values({ prospectId: prospectId!, channel, value, normalizedValue: normalizeContact(channel, value), fingerprint, evidenceId, verification, verificationMethod: method, verifiedAt: new Date(), staleAfter: stale, kind, corroborated })
-        .onConflictDoUpdate({ target: [contacts.prospectId, contacts.fingerprint], set: { verification, verificationMethod: method, verifiedAt: new Date(), staleAfter: stale, corroborated } }).returning({ id: contacts.id });
+      const formatValid = verification !== "invalid";
+      const domainMailEnabled = channel === "email" && verification !== "invalid";
+      const [row] = await tx.insert(contacts).values({ prospectId: prospectId!, channel, value, normalizedValue: normalizeContact(channel, value), fingerprint, evidenceId, verification, verificationMethod: method, verifiedAt: new Date(), staleAfter: stale, kind, corroborated, formatValid, sourcePublished: true, domainMailEnabled, independentlyCorroborated: corroborated })
+        .onConflictDoUpdate({ target: [contacts.prospectId, contacts.fingerprint], set: { verification, verificationMethod: method, verifiedAt: new Date(), staleAfter: stale, corroborated, formatValid, sourcePublished: true, domainMailEnabled, independentlyCorroborated: corroborated } }).returning({ id: contacts.id });
       for (const c of checks) await tx.insert(contactVerifications).values({ contactId: row.id, ...c });
       channel === "email" ? emailCount++ : phoneCount++;
     };

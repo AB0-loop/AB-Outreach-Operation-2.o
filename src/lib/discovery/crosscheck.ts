@@ -1,7 +1,8 @@
 import "server-only";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { auditEvents, contactVerifications, contacts, prospects } from "@/db/schema";
+import { auditEvents, contactVerifications, contacts, phoneCrosschecks, placeReferences, prospects } from "@/db/schema";
+import { isNotNull, lte } from "drizzle-orm";
 import { rootHost } from "@/lib/discovery/extract";
 import { crossCheckPhone, matchListingForWebsite, placeDetails } from "@/lib/discovery/places";
 import { log } from "@/lib/log";
@@ -39,12 +40,15 @@ export async function crossCheckProspect(prospectId: string) {
     const check = crossCheckPhone(c.normalizedValue.startsWith("+") ? c.normalizedValue : c.value, listing.internationalPhoneNumber);
     outcomes[check.result] = (outcomes[check.result] ?? 0) + 1;
     await db.transaction(async tx => {
+      const [ref] = placeId ? await tx.insert(placeReferences).values({ prospectId: p.id, placeId, attribution: "Powered by Google", lastCheckedAt: new Date() }).onConflictDoUpdate({ target: [placeReferences.prospectId, placeReferences.placeId], set: { lastCheckedAt: new Date() } }).returning() : [];
+      await tx.insert(phoneCrosschecks).values({ contactId: c.id, placeReferenceId: ref?.id ?? null, verdict: check.result === "match" ? "match" : check.result === "no_match" ? "mismatch" : "no_phone_listed", detail: check.result === "match" ? "First-party phone matches Google Places listing" : check.result === "no_match" ? "First-party phone differs from Google Places listing — human confirmation required" : "Google Places listing has no phone number", attribution: "Powered by Google" });
       await tx.insert(contactVerifications).values({ contactId: c.id, method: "google_places_crosscheck", result: check.result, detail: { placeIdStored: true, listingNumberType: check.listingType ?? null } });
       if (check.result === "match") {
-        await tx.update(contacts).set({ verification: c.verification === "invalid" ? "invalid" : "verified", corroborated: true, verificationMethod: "first-party website + Google Places listing (independent cross-check)", verifiedAt: new Date(), staleAfter: new Date(Date.now() + 90 * 86400_000) }).where(eq(contacts.id, c.id));
+        const notInvalid = c.verification !== "invalid";
+        await tx.update(contacts).set({ verification: notInvalid ? "verified" : "invalid", corroborated: notInvalid, independentlyCorroborated: notInvalid, verificationMethod: "first-party website + Google Places listing (independent cross-check)", verifiedAt: new Date(), staleAfter: new Date(Date.now() + 90 * 86400_000) }).where(eq(contacts.id, c.id));
       } else if (c.corroborated) {
         // Previously corroborated number no longer matches: demote, keep first-party evidence.
-        await tx.update(contacts).set({ corroborated: false, verification: "published_unverified", verificationMethod: "first-party website; Google listing no longer matches" }).where(eq(contacts.id, c.id));
+        await tx.update(contacts).set({ corroborated: false, independentlyCorroborated: false, verification: "published_unverified", verificationMethod: "first-party website; Google listing no longer matches" }).where(eq(contacts.id, c.id));
       }
     });
   }
@@ -64,3 +68,7 @@ export async function selectCrossCheckTargets(limit: number) {
   return (r.rows as Array<{ id: string }>).map(x => x.id);
 }
 export function logCrossCheckSkip(reason: string) { log("warn", "crosscheck.skipped", { reason }); }
+export async function purgeExpiredPlaceCache() {
+  const purged = await db.update(placeReferences).set({ cachedLat: null, cachedLng: null, coordinateCacheExpiresAt: null }).where(and(isNotNull(placeReferences.coordinateCacheExpiresAt), lte(placeReferences.coordinateCacheExpiresAt, new Date()))).returning({ id: placeReferences.id });
+  return { purged: purged.length };
+}

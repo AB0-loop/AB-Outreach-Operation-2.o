@@ -47,3 +47,11 @@
 - **Corrected:** four setup paraphrases are now labelled human-entered.
 - **Gate 3:** 8/8 contacts re-confirmed on their source pages.
 - **Tests:** 32 unit/integration (two runs); 25-check end-to-end.
+
+## 2026-11-19 — Autonomous client discovery batch + 24h Telegram PDF report
+
+- Merged best compliance & verification modules from `AB-Outreach-Operation-2.o` (`evidence-level.ts`, 5-referral partner scoring gate in `partners.ts`, `place_references` & `phone_crosschecks` tables with 30-day coordinate cache purge, and `no-fabrication.test.ts`).
+- Fixed `robotsAllowed` wildcard matching so `Disallow: /*?` only blocks query-string URLs rather than `/`.
+- Enforced minimum 1 published phone or email contact before retaining a discovered business for cold outreach.
+- Added multi-page PDF-1.4 daily report generator (`src/lib/pdf-report.ts`), direct download endpoint (`GET /api/reports/daily-pdf`), and once-per-24-hours Telegram Bot API `sendDocument` delivery (`src/lib/telegram.ts`).
+- Executed live autonomous discovery batch across Bengaluru wedding planners, venues, photography studios, and corporate event management firms: 32 Bengaluru businesses retained, 93 published contacts extracted and verified (54 callable phones, 39 MX-enabled emails), 36,800-byte PDF generated.
